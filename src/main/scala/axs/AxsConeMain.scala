@@ -34,17 +34,15 @@ object AxsConeMain {
     val center_dec = 13.0748496
   
     // println(rec)
-    val outputInfo : Array[ColumnInfo] = Array.ofDim(3)
+    val outputInfo : Array[ColumnInfo] = Array.ofDim(8)
     outputInfo(0) = new ColumnInfo("matchid", classOf[java.lang.Long], "Object ID")
     outputInfo(1) = new ColumnInfo("ra", classOf[java.lang.Double], "RA")
     outputInfo(2) = new ColumnInfo("dec", classOf[java.lang.Double], "Dec")
-    /* 
     outputInfo(3) = new ColumnInfo("mjd", classOf[java.lang.Double], "MJD")
-    outputInfo(4) = new ColumnInfo("mag", classOf[java.lang.Double], "Mag")
-    outputInfo(5) = new ColumnInfo("magerr", classOf[java.lang.Double], "Mag Error")
-    outputInfo(6) = new ColumnInfo("filterid", classOf[java.lang.Integer], "Filter (1:g, 2:R, 3:i)")
-    outputInfo(7) = new ColumnInfo("catflags", classOf[java.lang.Long], "Flags")
-    */
+    outputInfo(4) = new ColumnInfo("mag", classOf[java.lang.Float], "Mag")
+    outputInfo(5) = new ColumnInfo("magerr", classOf[java.lang.Float], "Mag Error")
+    outputInfo(6) = new ColumnInfo("filterid", classOf[java.lang.Long], "Filter (1:g, 2:R, 3:i)")
+    outputInfo(7) = new ColumnInfo("catflags", classOf[java.lang.Integer], "Flags")
 
     val outputTable = new RowListStarTable(outputInfo)
 
@@ -54,66 +52,41 @@ object AxsConeMain {
                               ("ra", "double"),
                               ("dec", "double"))
 
-    var object_row_n = 0
+    val list_columns =  List(("mjd", "double"),
+                             ("mag", "float"),
+                             ("magerr", "float"),
+                             ("filterid", "long"),
+                             ("catflags", "integer"))
+
     for (rec <- records)  {
       val fixedCellList : List[AnyRef] = parquet_fields.map(
           _ match {
             case (columnName: String,  "long") => rec.getLong(columnName, 0) : java.lang.Long
             case (columnName: String,  "double") => rec.getDouble(columnName, 0) : java.lang.Double
+            case (columnName: String,  "integer") => rec.getInteger(columnName, 0) : java.lang.Integer
+            case (columnName: String,  "float") => rec.getFloat(columnName, 0) : java.lang.Float
           })
 
       // outputTable.addRow(List( rec.getLong("matchid", 0) : java.lang.Long, rec.getDouble("ra", 0) : java.lang.Double, rec.getDouble("dec", 0) : java.lang.Double).toArray[Object])
-      outputTable.addRow(fixedCellList.toArray[Object].clone)
-      object_row_n += 1
+      val array_col_len = rec.getGroup("mjd",0).getFieldRepetitionCount("list")
+      for(array_col_n <- 0 to (array_col_len - 1)) {
+        val arrayCellList : List[AnyRef] = list_columns.map( _ match {
+          case (columnName: String, "long") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getLong("element", 0) : java.lang.Long
+          case (columnName: String, "double") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getDouble("element", 0) : java.lang.Double
+          case (columnName: String, "integer") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getInteger("element", 0) : java.lang.Integer
+          case (columnName: String, "float") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getFloat("element", 0) : java.lang.Float
+        })
+
+        outputTable.addRow((fixedCellList ++ arrayCellList).toArray[Object])
+      }
     }
 
-    // outputTable.addRow(List(1234 : java.lang.Long, 32.2: java.lang.Double, 23.5: java.lang.Double).toArray[Object])
 
     val writer = new VOTableWriter()
     writer.writeStarTable(outputTable, System.out)
 
-    /*
-    val mjdGroup = rec.getGroup("mjd", 0)
-    // println(rec.getType())
-
-    val repCount = mjdGroup.getFieldRepetitionCount("list")
-    println("rep: ", repCount)
-    println("0: ", mjdGroup.getGroup("list", 0).getDouble("element", 0))
-    println("0: ", mjdGroup.getGroup("list", 1).getDouble("element", 0))
-    println("0: ", mjdGroup.getGroup("list", 2).getDouble("element", 0))
-    println("0: ", mjdGroup.getGroup("list", repCount - 1).getDouble("element", 0))
-
-    */
-    val list_columns =  List(("mjd", "double"),
-                             ("mag", "double"),
-                             ("magerr", "double"),
-                             ("filterid", "integer"),
-                             ("catflags", "long"))
-
-    
-    /*
-
-
-    val array_row_n = 0
-    for (array_row_n <- 0 to repCount) {
-      val outputRows = foreach s
-      val 
-      val arr_output_row = list_columns.map(
-        _ match {
-          case (columnName: String, "double") => rec.getGroup(columnName, 0).getGroup("list", output_row).getDouble("element", 0)
-          case (columnName: String, "long") => rec.getGroup(columnName, 0).getGroup("list", output_row).getLong("element", 0)
-          case (columnName: String, "integer") => rec.getGroup(columnName, 0).getGroup("list", output_row).getInteger("element", 0)
-        })
-    }
-    */
 
   }
-
-  /*
-  def getArrayColumnElement(record, columnName, array_index, type) = {
-    record.getGroup(columnName, 0).getGroup("list", output_row).getDouble("element", 0)
-  }
-  */
 
   def runQuery(center_ra : Double, center_dec : Double, cone_radius : Double, filename : String) : Iterator[Group] = {
     val zone = math.floor((center_dec + 90)/(1/60.0)).toLong
