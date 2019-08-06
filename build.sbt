@@ -12,6 +12,10 @@ libraryDependencies += "org.rogach" %% "scallop" % "3.1.5"
 libraryDependencies += "uk.ac.starlink" % "stil-io" % "3.3.2"
 libraryDependencies += "gov.nasa.gsfc.heasarc" % "nom-tam-fits" % "1.15.2"
 
+libraryDependencies += "com.typesafe.akka" %% "akka-http" % "10.1.9"
+libraryDependencies += "com.typesafe.akka" %% "akka-actor" % "2.5.23"
+libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.5.23"
+
 
 // Required for stil-io
 resolvers += Resolver.jcenterRepo
