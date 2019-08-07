@@ -18,6 +18,18 @@ import uk.ac.starlink.votable.VOTableWriter
 
 import scala.collection.JavaConversions._
 
+/*
+object ResultsLevel extends Enumeration {
+  type ResultsLevel = Value
+  val narrow, lightcurve, fulltable = Value
+}
+*/
+
+sealed trait ResultsLevel
+case object ResultsNarrow extends ResultsLevel
+case object ResultsLightcurve extends ResultsLevel
+case object ResultsFull extends ResultsLevel
+
 class AxsConeSearch(val filename: String) {
 
   /** Return a VOTable containing objects near the specified point
@@ -25,66 +37,72 @@ class AxsConeSearch(val filename: String) {
    *  Coordinates and cone radius are in degrees.
    *
    */
-  def search(center_ra : Double, center_dec : Double, cone_radius : Double) = {
-  
-    val outputInfo : Array[ColumnInfo] = Array.ofDim(8)
-    outputInfo(0) = new ColumnInfo("matchid", classOf[java.lang.Long], "Object ID")
-    outputInfo(1) = new ColumnInfo("ra", classOf[java.lang.Double], "RA")
-    outputInfo(2) = new ColumnInfo("dec", classOf[java.lang.Double], "Dec")
-    outputInfo(3) = new ColumnInfo("mjd", classOf[java.lang.Double], "MJD")
-    outputInfo(4) = new ColumnInfo("mag", classOf[java.lang.Float], "Mag")
-    outputInfo(5) = new ColumnInfo("magerr", classOf[java.lang.Float], "Mag Error")
-    outputInfo(6) = new ColumnInfo("filterid", classOf[java.lang.Long], "Filter (1:g, 2:R, 3:i)")
-    outputInfo(7) = new ColumnInfo("catflags", classOf[java.lang.Integer], "Flags")
+  def search(center_ra : Double, center_dec : Double, cone_radius : Double, columns : ResultsLevel = ResultsLightcurve) = {
+
+    val fixed_columns = List(("matchid", "long", Set(ResultsNarrow, ResultsLightcurve), "Object ID"), 
+                              ("ra", "double", Set(ResultsNarrow, ResultsLightcurve), "RA"),
+                              ("dec", "double", Set(ResultsNarrow, ResultsLightcurve), "Dec"))
+
+    val list_columns =  List(("mjd", "double", Set(ResultsLightcurve), "MJD"),
+                             ("mag", "float", Set(ResultsLightcurve), "Magnitude"),
+                             ("magerr", "float", Set(ResultsLightcurve), "Mag Error"),
+                             ("filterid", "long", Set(ResultsLightcurve), "Filter (1:g, 2:R, 3:i)"),
+                             ("catflags", "integer", Set(ResultsLightcurve), "Flags"))
+
+
+    val selected_fixed_columns = fixed_columns.filter( { case  (_, _, level, _) => level contains columns})
+    val selected_list_columns = list_columns.filter( { case  (_, _, level, _) => level contains columns})
+
+    val outputInfo : Array[ColumnInfo] = (selected_fixed_columns ++ selected_list_columns).map(_ match {
+      case (colname, "long", _, doc) => new ColumnInfo(colname, classOf[java.lang.Long], doc)
+      case (colname, "double", _, doc) => new ColumnInfo(colname, classOf[java.lang.Double], doc)
+      case (colname, "float", _, doc) => new ColumnInfo(colname, classOf[java.lang.Float], doc)
+      case (colname, "integer", _, doc) => new ColumnInfo(colname, classOf[java.lang.Integer], doc)
+    }).toArray
 
     val outputTable = new RowListStarTable(outputInfo)
 
-    val records  = AxsConeSearch.runQuery(center_ra, center_dec, cone_radius, filename)
-    val parquet_fields = List(("matchid", "long"), 
-                              ("ra", "double"),
-                              ("dec", "double"))
-
-    val list_columns =  List(("mjd", "double"),
-                             ("mag", "float"),
-                             ("magerr", "float"),
-                             ("filterid", "long"),
-                             ("catflags", "integer"))
+    val records  = AxsConeSearch.runQuery(center_ra, center_dec, cone_radius, filename, columns)
 
     for (rec <- records)  {
-      val fixedCellList : List[AnyRef] = parquet_fields.map(
+      val fixedCellList : List[AnyRef] = selected_fixed_columns.map(
           _ match {
-            case (columnName: String,  "long") => rec.getLong(columnName, 0) : java.lang.Long
-            case (columnName: String,  "double") => rec.getDouble(columnName, 0) : java.lang.Double
-            case (columnName: String,  "integer") => rec.getInteger(columnName, 0) : java.lang.Integer
-            case (columnName: String,  "float") => rec.getFloat(columnName, 0) : java.lang.Float
+            case (columnName: String, "long", _, _) => rec.getLong(columnName, 0) : java.lang.Long
+            case (columnName: String, "double", _, _) => rec.getDouble(columnName, 0) : java.lang.Double
+            case (columnName: String, "integer", _, _) => rec.getInteger(columnName, 0) : java.lang.Integer
+            case (columnName: String, "float", _, _) => rec.getFloat(columnName, 0) : java.lang.Float
           })
 
-      val array_col_len = rec.getGroup("mjd",0).getFieldRepetitionCount("list")
-      for(array_col_n <- 0 to (array_col_len - 1)) {
-        val arrayCellList : List[AnyRef] = list_columns.map( _ match {
-          case (columnName: String, "long") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getLong("element", 0) : java.lang.Long
-          case (columnName: String, "double") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getDouble("element", 0) : java.lang.Double
-          case (columnName: String, "integer") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getInteger("element", 0) : java.lang.Integer
-          case (columnName: String, "float") => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getFloat("element", 0) : java.lang.Float
-        })
+      if(selected_list_columns.size == 0) {
+        outputTable.addRow((fixedCellList).toArray[Object])
+      } else {
+        val array_col_len = rec.getGroup("mjd",0).getFieldRepetitionCount("list")
+        for(array_col_n <- 0 to (array_col_len - 1)) {
+          val arrayCellList : List[AnyRef] = selected_list_columns.map( _ match {
+            case (columnName: String, "long", _, _) => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getLong("element", 0) : java.lang.Long
+            case (columnName: String, "double", _, _) => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getDouble("element", 0) : java.lang.Double
+            case (columnName: String, "integer", _, _) => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getInteger("element", 0) : java.lang.Integer
+            case (columnName: String, "float", _, _) => rec.getGroup(columnName, 0).getGroup("list", array_col_n).getFloat("element", 0) : java.lang.Float
+          })
 
-        outputTable.addRow((fixedCellList ++ arrayCellList).toArray[Object])
+          outputTable.addRow((fixedCellList ++ arrayCellList).toArray[Object])
+        }
       }
     }
 
     val writer = new VOTableWriter()
     val outputStream = new java.io.ByteArrayOutputStream()
-    // writer.writeStarTable(outputTable, System.out)
     writer.writeStarTable(outputTable, outputStream)
     outputStream
   }
 
 }
 
+
 object AxsConeSearch {
 
 
-  def runQuery(center_ra : Double, center_dec : Double, cone_radius : Double, filename : String) : Iterator[Group] = {
+  def runQuery(center_ra : Double, center_dec : Double, cone_radius : Double, filename : String, columns : ResultsLevel) : Iterator[Group] = {
     val zone = math.floor((center_dec + 90)/(1/60.0)).toLong
 
     val spatial = FilterApi.and(
@@ -95,18 +113,23 @@ object AxsConeSearch {
     var filter = FilterApi.and(spatial, FilterApi.eq(FilterApi.longColumn("zone"), zone: java.lang.Long))
 
                                                
-    val builder = ParquetReader.builder(new GroupReadSupport(), new Path(filename))
+    val readSupport = new GroupReadSupport()
 
     val configuration = new Configuration()
-    /* Unfinished
-    val readFooter = ParquetFileReader.readFooter(configuration, new Path(filename))
+
+    val readFooter = ParquetFileReader.readFooter(configuration, new Path(filename + "part-00000-721cf928-732a-4452-a1f9-37b4501c841a_00000.c000.snappy.parquet"))
     val schema = readFooter.getFileMetaData().getSchema()
-    val okColumns = Set("ra", "dec", "matchid", "mjd", "mag", "magerr", "filterid", "catflags")
+
+    val okColumns = columns match {
+      case ResultsNarrow => Set("matchid", "ra", "dec" )
+      case ResultsLightcurve => Set("ra", "dec", "matchid", "mjd", "mag", "magerr", "filterid", "catflags")
+      case ResultsFull => Set("ra", "dec", "matchid", "mjd", "mag", "magerr", "filterid", "catflags")
+    }
     val subsetSchema = new MessageType(schema.getName(), schema.getFields().filter(x => okColumns contains x.getName()))
 
-    println(subsetSchema)
-    builder.getReadSupport().init(configuration, null, subsetSchema)
-    */
+    /* println(subsetSchema) */
+    readSupport.init(configuration, null, subsetSchema)
+    val builder = ParquetReader.builder(readSupport, new Path(filename))
       
     val reader = builder.withFilter(FilterCompat.get(filter)).build()
 
