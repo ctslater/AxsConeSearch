@@ -9,6 +9,7 @@ import org.rogach.scallop._
 
 class AxsConeConf(arguments: Seq[String]) extends ScallopConf(arguments) {
   val server = opt[Boolean]()
+  val port = opt[Int](default=Some(8080))
   val filename = trailArg[String]()
   verify()
 }
@@ -20,7 +21,7 @@ object AxsConeMain {
     val conf = new AxsConeConf(args)
 
     if(conf.server()) {
-      VOServer.start(conf.filename())
+      VOServer.start(conf.filename(), conf.port())
 
     } else {
 

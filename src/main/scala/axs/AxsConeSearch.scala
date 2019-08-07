@@ -59,7 +59,6 @@ class AxsConeSearch(val filename: String) {
             case (columnName: String,  "float") => rec.getFloat(columnName, 0) : java.lang.Float
           })
 
-      // outputTable.addRow(List( rec.getLong("matchid", 0) : java.lang.Long, rec.getDouble("ra", 0) : java.lang.Double, rec.getDouble("dec", 0) : java.lang.Double).toArray[Object])
       val array_col_len = rec.getGroup("mjd",0).getFieldRepetitionCount("list")
       for(array_col_n <- 0 to (array_col_len - 1)) {
         val arrayCellList : List[AnyRef] = list_columns.map( _ match {
